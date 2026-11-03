@@ -28,7 +28,7 @@ const now = () => Date.now();
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-const defaults = () => ({ events: {}, monthNotes: {}, settings: { artOpacity: 40, artIntro: true, mondayStart: false, artMode: "anim", frost: 60 } });
+const defaults = () => ({ events: {}, monthNotes: {}, settings: { artOpacity: 40, artIntro: true, mondayStart: false, artMode: "anim", frostOn: true, frost: 60, frostBlur: 6 } });
 let data = (() => {
   try {
     const d = JSON.parse(safeGet(STORE_KEY));
@@ -102,7 +102,11 @@ let shownArtKey = null;
 function applySettings() {
   const st = document.documentElement.style;
   st.setProperty("--art-opacity", (data.settings.artOpacity / 100).toFixed(2));
-  st.setProperty("--frost", (data.settings.frost / 100).toFixed(2));
+  const on = data.settings.frostOn;
+  st.setProperty("--frost-a", on ? (data.settings.frost / 100 * 0.85).toFixed(3) : "0");
+  st.setProperty("--frost-blur", on ? data.settings.frostBlur + "px" : "0px");
+  $("frostOpacityRow").classList.toggle("off", !on);
+  $("frostBlurRow").classList.toggle("off", !on);
 }
 
 function render(dir = 0) {
@@ -376,6 +380,8 @@ async function paintArtMonthState() {
 $("settingsBtn").onclick = () => {
   $("artOpacity").value = data.settings.artOpacity;
   $("frost").value = data.settings.frost;
+  $("frostOn").checked = data.settings.frostOn;
+  $("frostBlur").value = data.settings.frostBlur;
   $("artIntro").checked = data.settings.artIntro;
   $("mondayStart").checked = data.settings.mondayStart;
   paintArtMode(); paintArtMonthState();
@@ -393,6 +399,9 @@ $("artOpacity").oninput = (e) => { data.settings.artOpacity = +e.target.value; a
 $("artOpacity").onchange = () => persist();
 $("frost").oninput = (e) => { data.settings.frost = +e.target.value; applySettings(); };
 $("frost").onchange = () => persist();
+$("frostBlur").oninput = (e) => { data.settings.frostBlur = +e.target.value; applySettings(); };
+$("frostBlur").onchange = () => persist();
+$("frostOn").onchange = (e) => { data.settings.frostOn = e.target.checked; applySettings(); persist(); };
 $("artIntro").onchange = (e) => { data.settings.artIntro = e.target.checked; persist(); };
 $("mondayStart").onchange = (e) => { data.settings.mondayStart = e.target.checked; persist(); render(); };
 

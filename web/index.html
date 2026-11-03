@@ -123,8 +123,12 @@
 
   <div class="set-group">
     <h4>Calendar</h4>
-    <label class="range">Frosted panel behind the dates
-      <input type="range" id="frost" min="0" max="100" step="1">
+    <label class="check"><input type="checkbox" id="frostOn"> Frosted panel behind the dates</label>
+    <label class="range" id="frostOpacityRow">Panel strength <small class="hint">(lower = more see-through)</small>
+      <input type="range" id="frost" min="5" max="100" step="1">
+    </label>
+    <label class="range" id="frostBlurRow">Blur behind the dates
+      <input type="range" id="frostBlur" min="0" max="20" step="1">
     </label>
     <label class="check"><input type="checkbox" id="mondayStart"> Start weeks on Monday</label>
   </div>

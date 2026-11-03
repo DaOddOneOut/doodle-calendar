@@ -9,7 +9,8 @@
   --sun: #d8344a;
   --accent: #e88aa6;
   --art-opacity: .3;
-  --frost: .7;
+  --frost-a: .5;
+  --frost-blur: 6px;
   --halo: 0 0 6px var(--paper), 0 0 12px var(--paper), 0 0 2px var(--paper);
   --ease: cubic-bezier(.22,.8,.24,1);
 }
@@ -52,8 +53,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   filter: saturate(.9);
 }
 .art.out { opacity: 0; transform: scale(1.1) translateY(2vh); transition-duration: .7s; }
-body.peek .art.flash { opacity: min(1, calc(var(--art-opacity) + .32)); transform: scale(1.02) translateY(1vh); }
-.art.settled { opacity: 1; transform: scale(1) translateY(0); filter: none; }
+body.peek .art.settled { opacity: 1; transform: scale(1) translateY(0); filter: none; }
 
 /* ---------- App ---------- */
 #app {
@@ -105,10 +105,11 @@ body.peek .toolbar { opacity: 1; }
 /* ---------- Grid ---------- */
 .cal {
   padding: 6px 6px 8px; border-radius: 24px;
-  background: rgb(251 244 236 / calc(var(--frost) * .62));
-  -webkit-backdrop-filter: blur(calc(var(--frost) * 9px)) saturate(1.08);
-  backdrop-filter: blur(calc(var(--frost) * 9px)) saturate(1.08);
-  box-shadow: 0 8px 30px rgb(70 40 60 / calc(var(--frost) * .12)), inset 0 0 0 1px rgb(255 255 255 / calc(var(--frost) * .5));
+  background: rgb(251 244 236 / var(--frost-a));
+  -webkit-backdrop-filter: blur(var(--frost-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--frost-blur)) saturate(1.08);
+  box-shadow: 0 8px 30px rgb(70 40 60 / calc(var(--frost-a) * .2)), inset 0 0 0 1px rgb(255 255 255 / calc(var(--frost-a) * .8));
+  transition: background .2s, box-shadow .2s;
 }
 .dow, .grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .dow span {
@@ -225,6 +226,7 @@ form { display: grid; gap: 9px; }
 .check { display: flex; gap: 8px; align-items: center; font-size: .92rem; }
 .range { display: grid; gap: 4px; font-size: .92rem; }
 .range input { width: 100%; accent-color: var(--accent); }
+.range.off { opacity: .4; pointer-events: none; }
 
 .toast {
   position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);

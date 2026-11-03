@@ -54,7 +54,8 @@ final class WidgetRenderer {
         List<Ev> events = parseEvents(data);
         JSONObject settings = data.optJSONObject("settings");
         int artOpacity = settings != null ? settings.optInt("artOpacity", 40) : 40;
-        int frost = settings != null ? settings.optInt("frost", 60) : 60;
+        boolean frostOn = settings == null || settings.optBoolean("frostOn", true);
+        int frost = !frostOn ? 0 : settings != null ? settings.optInt("frost", 60) : 60;
         boolean mondayStart = settings != null && settings.optBoolean("mondayStart", false);
         int accent = ACCENTS[month];
 
