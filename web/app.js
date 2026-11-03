@@ -7,9 +7,15 @@ const DOW = ["S","M","T","W","T","F","S"];
 const ACCENTS = ["#5f93cf","#e2789a","#6aa55a","#ea86a8","#d9a33a","#2f86d0","#3576c9","#e2a10f","#bd7638","#e0731d","#c06a26","#d32f37"];
 const COLORS = ["#e2789a","#2f86d0","#6aa55a","#e2a10f","#8a63c9","#d32f37"];
 const STORE_KEY = "dc.data.v1";
-const SYNC_KEY = "dc.sync.v1";
-const GIST_FILE = "doodle-calendar.json";
 const isAndroid = !!window.AndroidBridge;
+// Safari can't show transparent WebM, so it always gets the still art.
+const canAnimate = (() => {
+  const ua = navigator.userAgent;
+  const safari = /safari/i.test(ua) && !/chrome|chromium|crios|android|edg/i.test(ua);
+  const v = document.createElement("video");
+  return !safari && !!v.canPlayType && v.canPlayType('video/webm; codecs="vp9"') !== "";
+})();
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, "0");
@@ -22,7 +28,7 @@ const now = () => Date.now();
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-const defaults = () => ({ events: {}, monthNotes: {}, settings: { artOpacity: 30, artIntro: true, mondayStart: false } });
+const defaults = () => ({ events: {}, monthNotes: {}, settings: { artOpacity: 40, artIntro: true, mondayStart: false, artMode: "anim", frost: 60 } });
 let data = (() => {
   try {
     const d = JSON.parse(safeGet(STORE_KEY));
@@ -30,15 +36,14 @@ let data = (() => {
   } catch {}
   return defaults();
 })();
-let syncCfg = (() => { try { return JSON.parse(safeGet(SYNC_KEY)) || {}; } catch { return {}; } })();
+try { localStorage.removeItem("dc.sync.v1"); } catch {}
 
-function persist({ sync = true } = {}) {
+function persist() {
   safeSet(STORE_KEY, JSON.stringify(data));
   pushToAndroid();
-  if (sync) scheduleSync();
 }
 
-/* custom art lives in IndexedDB (blobs are too big for localStorage) */
+/* custom art lives in IndexedDB (files are too big for localStorage) */
 const idb = (() => {
   let dbp;
   const open = () => dbp || (dbp = new Promise((res, rej) => {
@@ -56,12 +61,19 @@ const idb = (() => {
     del: (k) => tx("readwrite", (s) => s.delete(k)),
   };
 })();
-const artUrlCache = {};
-async function artUrl(m) {
+const customCache = {};
+/** What to show for a month: {url, video:boolean, custom:boolean} */
+async function artSource(m) {
   const blob = await idb.get(m + 1);
-  if (blob) { if (!artUrlCache[m]) artUrlCache[m] = URL.createObjectURL(blob); return artUrlCache[m]; }
-  return `art/${pad(m + 1)}.webp`;
+  if (blob) {
+    if (!customCache[m]) customCache[m] = URL.createObjectURL(blob);
+    return { url: customCache[m], video: (blob.type || "").startsWith("video/"), custom: true };
+  }
+  const anim = data.settings.artMode === "anim" && canAnimate && !reducedMotion;
+  return anim ? { url: `art/anim/${pad(m + 1)}.webm`, video: true, custom: false }
+              : { url: `art/still/${pad(m + 1)}.webp`, video: false, custom: false };
 }
+function forgetCustom(m) { if (customCache[m]) { URL.revokeObjectURL(customCache[m]); delete customCache[m]; } }
 
 /* ---------------- recurrence ---------------- */
 function occurs(ev, ds) {
@@ -85,10 +97,12 @@ function eventsOn(ds) {
 const today = new Date();
 let view = { y: today.getFullYear(), m: today.getMonth() };
 let selected = null;
-let shownArtMonth = null;
+let shownArtKey = null;
 
 function applySettings() {
-  document.documentElement.style.setProperty("--art-opacity", (data.settings.artOpacity / 100).toFixed(2));
+  const st = document.documentElement.style;
+  st.setProperty("--art-opacity", (data.settings.artOpacity / 100).toFixed(2));
+  st.setProperty("--frost", (data.settings.frost / 100).toFixed(2));
 }
 
 function render(dir = 0) {
@@ -152,50 +166,109 @@ function fmtTime(t) {
 
 /* ---------------- illustration transition ---------------- */
 let artFront = $("artA"), artBack = $("artB"), artTimer = 0, firstArt = true;
-async function showArt(m) {
-  if (shownArtMonth === m && !showArt.force) return;
-  showArt.force = false;
-  shownArtMonth = m;
-  const url = await artUrl(m);
-  if (shownArtMonth !== m) return;
+function makeMedia(src) {
+  return new Promise((resolve) => {
+    let el;
+    if (src.video) {
+      el = document.createElement("video");
+      Object.assign(el, { muted: true, loop: true, autoplay: true, playsInline: true, preload: "auto" });
+      el.setAttribute("muted", ""); el.setAttribute("playsinline", "");
+      el.src = src.url;
+      const done = () => { el.play().catch(() => {}); resolve(el); };
+      el.addEventListener("loadeddata", done, { once: true });
+      el.addEventListener("error", () => resolve(null), { once: true });
+    } else {
+      el = new Image(); el.alt = ""; el.src = src.url;
+      el.decode().then(() => resolve(el), () => resolve(el.complete && el.naturalWidth ? el : null));
+    }
+    setTimeout(() => resolve(el), 2500); // never block the calendar on a slow file
+  });
+}
+async function showArt(m, force = false) {
+  const src = await artSource(m);
+  const key = `${m}|${src.url}`;
+  if (key === shownArtKey && !force) return;
+  shownArtKey = key;
+  let media = await makeMedia(src);
+  if (!media && src.video && !src.custom) media = await makeMedia({ url: `art/still/${pad(m + 1)}.webp`, video: false });
+  if (shownArtKey !== key) return;
+
   const incoming = artBack, outgoing = artFront;
   artFront = incoming; artBack = outgoing;
   incoming.className = "art";
-  incoming.src = url;
-  try { await incoming.decode(); } catch {}
-  if (shownArtMonth !== m) return;
+  incoming.replaceChildren(...(media ? [media] : []));
   outgoing.classList.remove("reveal", "flash", "settled");
-  if (outgoing.getAttribute("src")) outgoing.classList.add("out");
+  if (outgoing.firstChild) outgoing.classList.add("out");
+  const old = outgoing.firstChild;
+  setTimeout(() => { if (outgoing !== artFront && outgoing.firstChild === old) { if (old && old.pause) old.pause(); outgoing.replaceChildren(); } }, 900);
+
   clearTimeout(artTimer);
   const intro = firstArt || data.settings.artIntro;
+  const cls = intro ? (firstArt ? "reveal" : "flash") : "settled";
+  const wasFirst = firstArt;
+  firstArt = false;
   requestAnimationFrame(() => {
-    const cls = intro ? (firstArt ? "reveal" : "flash") : "settled";
     incoming.classList.add(cls);
     if (intro) {
       artTimer = setTimeout(() => {
         incoming.classList.remove("reveal", "flash"); incoming.classList.add("settled");
         document.body.classList.remove("intro");
-      }, firstArt ? 1500 : 700);
+      }, wasFirst ? 1700 : 700);
     }
-    firstArt = false;
   });
 }
 
-function go(delta) {
-  view.m += delta;
-  if (view.m < 0) { view.m = 11; view.y--; }
-  if (view.m > 11) { view.m = 0; view.y++; }
-  render(delta);
+function setView(y, m, dir = 0) {
+  view = { y, m };
+  render(dir);
 }
+function go(delta) {
+  let { y, m } = view;
+  m += delta;
+  if (m < 0) { m = 11; y--; }
+  if (m > 11) { m = 0; y++; }
+  setView(y, m, delta);
+}
+
+/* ---------------- year / month picker ---------------- */
+let pick = null; // {kind:"year"|"month", base}
+function openPicker(kind) {
+  pick = { kind, base: kind === "year" ? view.y - 4 : view.y };
+  drawPicker();
+  $("backdrop").hidden = false; $("picker").hidden = false;
+}
+function drawPicker() {
+  const t = new Date();
+  if (pick.kind === "year") {
+    $("pickTitle").textContent = `${pick.base} – ${pick.base + 11}`;
+    $("pickGrid").innerHTML = Array.from({ length: 12 }, (_, i) => {
+      const y = pick.base + i;
+      return `<button data-y="${y}" class="${y === view.y ? "cur" : ""} ${y === t.getFullYear() ? "now" : ""}">${y}</button>`;
+    }).join("");
+  } else {
+    $("pickTitle").textContent = pick.base;
+    $("pickGrid").innerHTML = MONTHS.map((name, i) =>
+      `<button data-m="${i}" class="${pick.base === view.y && i === view.m ? "cur" : ""} ${pick.base === t.getFullYear() && i === t.getMonth() ? "now" : ""}">${name.slice(0, 3)}</button>`).join("");
+  }
+}
+$("yearLabel").onclick = () => openPicker("year");
+$("monthLabel").onclick = () => openPicker("month");
+$("pickPrev").onclick = () => { pick.base -= pick.kind === "year" ? 12 : 1; drawPicker(); };
+$("pickNext").onclick = () => { pick.base += pick.kind === "year" ? 12 : 1; drawPicker(); };
+$("pickGrid").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const before = view.y * 12 + view.m;
+  if (b.dataset.y) { const y = +b.dataset.y; closeSheets(); setView(y, view.m, Math.sign(y * 12 + view.m - before)); }
+  else { const m = +b.dataset.m; closeSheets(); setView(pick.base, m, Math.sign(pick.base * 12 + m - before)); }
+};
 
 /* ---------------- day sheet ---------------- */
 let formColor = COLORS[0];
-function openSheet(el) {
-  $("backdrop").hidden = false; el.hidden = false;
-}
+function openSheet(el) { $("backdrop").hidden = false; el.hidden = false; }
 function closeSheets() {
-  $("backdrop").hidden = true; $("daySheet").hidden = true; $("settingsSheet").hidden = true;
-  selected = null; render();
+  const hadDay = !$("daySheet").hidden;
+  $("backdrop").hidden = true; $("daySheet").hidden = true; $("settingsSheet").hidden = true; $("picker").hidden = true;
+  if (hadDay) { selected = null; render(); }
 }
 function openDay(ds) {
   selected = ds;
@@ -242,8 +315,8 @@ $("eventForm").addEventListener("submit", (ev) => {
   persist(); renderDayEvents(); resetForm(); render();
 });
 $("evDelete").onclick = () => {
-  const id = $("evId").value; const e = data.events[id]; if (!e) return;
-  data.events[id] = { id, deleted: true, updatedAt: now(), date: e.date };
+  const id = $("evId").value; if (!data.events[id]) return;
+  delete data.events[id];
   persist(); renderDayEvents(); resetForm(); render(); toast("Deleted");
 };
 $("evCancel").onclick = resetForm;
@@ -263,7 +336,7 @@ $("monthNote").addEventListener("input", () => {
 /* ---------------- interactions ---------------- */
 $("prevBtn").onclick = () => go(-1);
 $("nextBtn").onclick = () => go(1);
-$("todayBtn").onclick = () => { const t = new Date(); const d = (t.getFullYear() - view.y) * 12 + t.getMonth() - view.m; view = { y: t.getFullYear(), m: t.getMonth() }; render(Math.sign(d)); };
+$("todayBtn").onclick = () => { const t = new Date(); const d = (t.getFullYear() - view.y) * 12 + t.getMonth() - view.m; setView(t.getFullYear(), t.getMonth(), Math.sign(d)); };
 $("grid").onclick = (e) => { const b = e.target.closest(".day"); if (b) openDay(b.dataset.d); };
 $("agenda").onclick = (e) => { const li = e.target.closest("li[data-d]"); if (li) openDay(li.dataset.d); };
 $("backdrop").onclick = closeSheets;
@@ -289,40 +362,65 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => { if (document.body.classList.contains("peek") && !e.target.closest("#peekBtn")) document.body.classList.remove("peek"); }, true);
 
 /* ---------------- settings ---------------- */
+function paintArtMode() {
+  for (const b of $("artMode").querySelectorAll("button")) {
+    const on = b.dataset.mode === data.settings.artMode;
+    b.classList.toggle("on", on); b.setAttribute("aria-checked", on);
+  }
+}
+async function paintArtMonthState() {
+  const blob = await idb.get(view.m + 1);
+  $("artMonthState").textContent = blob ? "Using your own art for this month." : "Using the original art.";
+  $("artResetBtn").hidden = !blob;
+}
 $("settingsBtn").onclick = () => {
   $("artOpacity").value = data.settings.artOpacity;
+  $("frost").value = data.settings.frost;
   $("artIntro").checked = data.settings.artIntro;
   $("mondayStart").checked = data.settings.mondayStart;
-  $("syncToken").value = syncCfg.token ? "••••••••••••" : "";
-  updateSyncUi();
+  paintArtMode(); paintArtMonthState();
   openSheet($("settingsSheet"));
 };
 $("settingsClose").onclick = closeSheets;
+$("settingsX").onclick = closeSheets;
+$("artMode").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  data.settings.artMode = b.dataset.mode; persist(); paintArtMode();
+  if (b.dataset.mode === "anim" && !canAnimate) toast("This browser can't play the animations, so it shows the still art");
+  showArt(view.m);
+};
 $("artOpacity").oninput = (e) => { data.settings.artOpacity = +e.target.value; applySettings(); };
-$("artOpacity").onchange = () => persist({ sync: false });
-$("artIntro").onchange = (e) => { data.settings.artIntro = e.target.checked; persist({ sync: false }); };
-$("mondayStart").onchange = (e) => { data.settings.mondayStart = e.target.checked; persist({ sync: false }); render(); };
+$("artOpacity").onchange = () => persist();
+$("frost").oninput = (e) => { data.settings.frost = +e.target.value; applySettings(); };
+$("frost").onchange = () => persist();
+$("artIntro").onchange = (e) => { data.settings.artIntro = e.target.checked; persist(); };
+$("mondayStart").onchange = (e) => { data.settings.mondayStart = e.target.checked; persist(); render(); };
 
 $("artUploadBtn").onclick = () => $("artFile").click();
 $("artFile").onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  const m = view.m;
   try {
-    const blob = await prepareArt(f, $("artCutout").checked);
-    const m = view.m;
+    const animated = f.type.startsWith("video/") || f.type === "image/gif" || (f.type === "image/webp" && await isAnimatedWebp(f));
+    const blob = animated ? f : await prepareArt(f, $("artCutout").checked);
     await idb.set(m + 1, blob);
-    if (artUrlCache[m]) { URL.revokeObjectURL(artUrlCache[m]); delete artUrlCache[m]; }
-    if (isAndroid) window.AndroidBridge.setArt(m + 1, await blobToDataUrl(blob));
-    showArt.force = true; showArt(m); toast(`${MONTHS[m]} art updated`);
-  } catch (err) { toast("Couldn't use that image"); console.error(err); }
+    forgetCustom(m);
+    if (isAndroid) window.AndroidBridge.setArt(m + 1, await stillFrameDataUrl(blob));
+    showArt(m, true); paintArtMonthState(); toast(`${MONTHS[m]} art updated`);
+  } catch (err) { toast("Couldn't use that file"); console.error(err); }
 };
 $("artResetBtn").onclick = async () => {
-  const m = view.m; await idb.del(m + 1);
-  if (artUrlCache[m]) { URL.revokeObjectURL(artUrlCache[m]); delete artUrlCache[m]; }
+  const m = view.m; await idb.del(m + 1); forgetCustom(m);
   if (isAndroid) window.AndroidBridge.clearArt(m + 1);
-  showArt.force = true; showArt(m); toast("Original art restored");
+  showArt(m, true); paintArtMonthState(); toast("Original art restored");
 };
 
-/* resize an upload and (optionally) knock out the white paper around it */
+async function isAnimatedWebp(file) {
+  const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const s = String.fromCharCode(...head);
+  return s.includes("ANIM") || (s.includes("VP8X") && (head[20] & 0x02) !== 0);
+}
+/* resize a still upload and (optionally) knock out the white paper around it */
 async function prepareArt(file, cutout) {
   const bmp = await createImageBitmap(file);
   const s = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
@@ -347,111 +445,40 @@ async function prepareArt(file, cutout) {
   }
   return new Promise((res) => c.toBlob(res, "image/png"));
 }
-const blobToDataUrl = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+/* the Android widget can't animate, so it gets the first frame as a PNG */
+async function stillFrameDataUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const media = await makeMedia({ url, video: (blob.type || "").startsWith("video/") });
+    const w = media.videoWidth || media.naturalWidth, h = media.videoHeight || media.naturalHeight;
+    const s = Math.min(1, 800 / Math.max(w, h));
+    const c = document.createElement("canvas"); c.width = Math.round(w * s); c.height = Math.round(h * s);
+    c.getContext("2d").drawImage(media, 0, 0, c.width, c.height);
+    if (media.pause) media.pause();
+    return c.toDataURL("image/png");
+  } finally { URL.revokeObjectURL(url); }
+}
 
 $("exportBtn").onclick = () => {
-  const blob = new Blob([JSON.stringify({ v: 1, events: data.events, monthNotes: data.monthNotes }, null, 2)], { type: "application/json" });
-  if (isAndroid) { window.AndroidBridge.saveFile("doodle-calendar-backup.json", JSON.stringify({ v: 1, events: data.events, monthNotes: data.monthNotes })); return; }
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `doodle-calendar-backup-${ymd(new Date())}.json`; a.click();
+  const json = JSON.stringify({ v: 1, events: data.events, monthNotes: data.monthNotes }, null, 2);
+  if (isAndroid) { window.AndroidBridge.saveFile(`doodle-calendar-backup-${ymd(new Date())}.json`, json); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  a.download = `doodle-calendar-backup-${ymd(new Date())}.json`; a.click();
 };
 $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
     const incoming = JSON.parse(await f.text());
-    mergeInto(incoming); persist(); render(); toast("Backup imported");
+    if (!incoming.events) throw new Error("not a backup");
+    for (const [k, v] of Object.entries(incoming.events)) if (!v.deleted) data.events[k] = v;
+    for (const [k, v] of Object.entries(incoming.monthNotes || {})) {
+      if (!data.monthNotes[k] || (v.updatedAt || 0) > (data.monthNotes[k].updatedAt || 0)) data.monthNotes[k] = v;
+    }
+    persist(); render(); toast("Backup imported");
   } catch { toast("That file isn't a calendar backup"); }
 };
-
-/* ---------------- sync (private GitHub gist) ---------------- */
-function mergeMaps(a = {}, b = {}) {
-  const out = { ...a };
-  for (const [k, v] of Object.entries(b)) if (!out[k] || (v.updatedAt || 0) > (out[k].updatedAt || 0)) out[k] = v;
-  return out;
-}
-function prune(events) {
-  const cutoff = now() - 180 * 864e5; const out = {};
-  for (const [k, v] of Object.entries(events)) if (!(v.deleted && v.updatedAt < cutoff)) out[k] = v;
-  return out;
-}
-function mergeInto(remote) {
-  data.events = prune(mergeMaps(data.events, remote.events));
-  data.monthNotes = mergeMaps(data.monthNotes, remote.monthNotes);
-}
-const syncPayload = () => JSON.stringify({ v: 1, events: data.events, monthNotes: data.monthNotes });
-
-async function gh(path, opts = {}) {
-  const r = await fetch(`https://api.github.com${path}`, {
-    ...opts,
-    headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${syncCfg.token}`, ...(opts.body ? { "Content-Type": "application/json" } : {}) },
-    cache: "no-store",
-  });
-  if (!r.ok) { const err = new Error(`GitHub ${r.status}`); err.status = r.status; throw err; }
-  return r.json();
-}
-function setDot(state) { $("syncDot").className = "sync-dot " + (state || ""); }
-function updateSyncUi(msg) {
-  const on = !!(syncCfg.token && syncCfg.gistId);
-  $("syncConnect").hidden = on; $("syncNow").hidden = !on; $("syncDisconnect").hidden = !on;
-  $("syncToken").disabled = on;
-  $("syncStatus").textContent = msg || (on ? `Connected${syncCfg.login ? ` as ${syncCfg.login}` : ""}. Last sync: ${syncCfg.last ? new Date(syncCfg.last).toLocaleString() : "never"}` : "Not connected.");
-}
-let syncing = false, syncAgain = false, syncTimer;
-function scheduleSync() { if (!syncCfg.gistId) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 1500); }
-async function sync() {
-  if (!syncCfg.token || !syncCfg.gistId || !navigator.onLine) return;
-  if (syncing) { syncAgain = true; return; }
-  syncing = true; setDot("busy");
-  try {
-    const gist = await gh(`/gists/${syncCfg.gistId}`);
-    const file = gist.files && gist.files[GIST_FILE];
-    let remote = { events: {}, monthNotes: {} };
-    if (file) remote = JSON.parse(file.truncated ? await (await fetch(file.raw_url, { cache: "no-store" })).text() : file.content || "{}");
-    const before = JSON.stringify([data.events, data.monthNotes]);
-    mergeInto(remote);
-    const payload = syncPayload();
-    if (payload !== JSON.stringify({ v: 1, events: remote.events || {}, monthNotes: remote.monthNotes || {} })) {
-      await gh(`/gists/${syncCfg.gistId}`, { method: "PATCH", body: JSON.stringify({ files: { [GIST_FILE]: { content: payload } } }) });
-    }
-    if (before !== JSON.stringify([data.events, data.monthNotes])) { persist({ sync: false }); render(); }
-    syncCfg.last = now(); safeSet(SYNC_KEY, JSON.stringify(syncCfg));
-    setDot("ok"); updateSyncUi();
-  } catch (e) {
-    setDot("err");
-    updateSyncUi(e.status === 401 ? "Your token was rejected. Disconnect and paste a new one." : e.status === 404 ? "The sync gist wasn't found. Disconnect and connect again." : "Sync failed. Will retry.");
-  } finally {
-    syncing = false;
-    if (syncAgain) { syncAgain = false; scheduleSync(); }
-  }
-}
-$("syncConnect").onclick = async () => {
-  const token = $("syncToken").value.trim(); if (!token || token.startsWith("•")) return toast("Paste your token first");
-  syncCfg = { token }; updateSyncUi("Connecting…"); setDot("busy");
-  try {
-    const user = await gh("/user"); syncCfg.login = user.login;
-    let gistId = null;
-    for (let page = 1; page <= 5 && !gistId; page++) {
-      const list = await gh(`/gists?per_page=100&page=${page}`);
-      const hit = list.find((g) => g.files && g.files[GIST_FILE]); if (hit) gistId = hit.id;
-      if (list.length < 100) break;
-    }
-    if (!gistId) {
-      const g = await gh("/gists", { method: "POST", body: JSON.stringify({ description: "Doodle Calendar data (synced by the app)", public: false, files: { [GIST_FILE]: { content: syncPayload() } } }) });
-      gistId = g.id;
-    }
-    syncCfg.gistId = gistId; safeSet(SYNC_KEY, JSON.stringify(syncCfg));
-    $("syncToken").value = "••••••••••••";
-    await sync(); toast("Sync connected");
-  } catch (e) {
-    syncCfg = {}; safeSet(SYNC_KEY, "{}"); setDot("err");
-    updateSyncUi(e.status === 401 ? "That token didn't work. Check it has the gist permission." : "Couldn't connect. Check your internet and try again.");
-  }
-};
-$("syncNow").onclick = () => sync();
-$("syncDisconnect").onclick = () => { syncCfg = {}; safeSet(SYNC_KEY, "{}"); $("syncToken").value = ""; setDot(""); updateSyncUi(); };
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { sync(); refreshTodayIfNeeded(); } });
-window.addEventListener("online", () => sync());
-setInterval(sync, 5 * 60 * 1000);
 
 /* ---------------- Android widget bridge ---------------- */
 function pushToAndroid() {
@@ -468,11 +495,16 @@ function pushToAndroid() {
 let toastTimer;
 function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 2200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 2400);
 }
 let lastDay = ymd(new Date());
 function refreshTodayIfNeeded() { const d = ymd(new Date()); if (d !== lastDay) { lastDay = d; render(); } }
 setInterval(refreshTodayIfNeeded, 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  refreshTodayIfNeeded();
+  const v = artFront.querySelector("video"); if (v) v.play().catch(() => {});
+});
 
 let installEvt = null;
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("installBtn").hidden = false; });
@@ -482,7 +514,7 @@ if (!isAndroid && "serviceWorker" in navigator && location.protocol === "https:"
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-// open a specific date when launched from the widget (?date=YYYY-MM-DD)
+// open a specific month when launched from the widget (?date=YYYY-MM-DD)
 const qDate = new URLSearchParams(location.search).get("date");
 if (qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate)) { const d = parseYmd(qDate); view = { y: d.getFullYear(), m: d.getMonth() }; }
 
@@ -490,8 +522,7 @@ document.body.classList.add("intro");
 applySettings();
 render();
 pushToAndroid();
-if (syncCfg.gistId) { setDot("ok"); sync(); }
 
 // test hook (used by automated checks only)
-window.__dc = { occurs, mergeMaps, data: () => data };
+window.__dc = { occurs, data: () => data, canAnimate };
 })();

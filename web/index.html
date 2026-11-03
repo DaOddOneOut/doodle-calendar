@@ -13,16 +13,16 @@
 </head>
 <body>
 <div id="artStage" aria-hidden="true">
-  <img id="artA" class="art" alt="">
-  <img id="artB" class="art" alt="">
+  <div id="artA" class="art"></div>
+  <div id="artB" class="art"></div>
 </div>
 
 <main id="app">
   <header class="top">
     <button class="icon-btn" id="prevBtn" aria-label="Previous month">‹</button>
     <div class="title-wrap">
-      <div class="year" id="yearLabel"></div>
-      <h1 id="monthLabel"></h1>
+      <button class="year" id="yearLabel" aria-label="Choose year"></button>
+      <button class="month-title" id="monthLabel" aria-label="Choose month"></button>
     </div>
     <button class="icon-btn" id="nextBtn" aria-label="Next month">›</button>
   </header>
@@ -30,7 +30,6 @@
   <div class="toolbar">
     <button class="chip" id="todayBtn">Today</button>
     <button class="chip" id="peekBtn" title="Show the illustration">✿ Art</button>
-    <span class="sync-dot" id="syncDot" title="Sync status"></span>
     <button class="chip" id="installBtn" hidden>Install</button>
     <button class="icon-btn small" id="settingsBtn" aria-label="Settings">⚙</button>
   </div>
@@ -52,8 +51,19 @@
   </section>
 </main>
 
-<!-- Day sheet -->
 <div class="sheet-backdrop" id="backdrop" hidden></div>
+
+<!-- Year / month picker -->
+<section class="picker" id="picker" hidden role="dialog" aria-modal="true">
+  <div class="picker-head">
+    <button class="icon-btn small" id="pickPrev" aria-label="Earlier">‹</button>
+    <div id="pickTitle"></div>
+    <button class="icon-btn small" id="pickNext" aria-label="Later">›</button>
+  </div>
+  <div class="picker-grid" id="pickGrid"></div>
+</section>
+
+<!-- Day sheet -->
 <section class="sheet" id="daySheet" hidden aria-modal="true" role="dialog">
   <div class="sheet-handle"></div>
   <div class="sheet-head"><h3 id="dayTitle"></h3><button class="icon-btn small" id="dayClose" aria-label="Close">×</button></div>
@@ -85,47 +95,47 @@
 <!-- Settings sheet -->
 <section class="sheet" id="settingsSheet" hidden aria-modal="true" role="dialog">
   <div class="sheet-handle"></div>
-  <h3>Settings</h3>
+  <div class="sheet-head"><h3>Settings</h3><button class="icon-btn small" id="settingsX" aria-label="Close">×</button></div>
 
   <div class="set-group">
-    <h4>Illustration</h4>
-    <label class="range">How visible behind the calendar
-      <input type="range" id="artOpacity" min="10" max="70" step="1">
+    <h4>Illustrations</h4>
+    <div class="seg" id="artMode" role="radiogroup" aria-label="Illustration style">
+      <button data-mode="anim" role="radio">Animated</button>
+      <button data-mode="still" role="radio">Still (original)</button>
+    </div>
+    <label class="range">How visible the art is behind the calendar
+      <input type="range" id="artOpacity" min="10" max="80" step="1">
     </label>
     <label class="check"><input type="checkbox" id="artIntro"> Play the reveal when switching months</label>
-    <p class="hint">Replace this month's art with your own (PNG with transparency works best).</p>
+  </div>
+
+  <div class="set-group">
+    <h4><span id="artMonthName"></span> art</h4>
+    <p class="hint" id="artMonthState"></p>
     <div class="row">
-      <button class="ghost" id="artUploadBtn">Replace <span id="artMonthName"></span> art</button>
+      <button class="ghost" id="artUploadBtn">Replace with my own…</button>
       <button class="ghost" id="artResetBtn">Use original</button>
     </div>
-    <label class="check"><input type="checkbox" id="artCutout" checked> Remove white background from uploads</label>
-    <input type="file" id="artFile" accept="image/*" hidden>
+    <label class="check"><input type="checkbox" id="artCutout" checked> Remove white background (still images only)</label>
+    <p class="hint">Accepts PNG, JPG, WebP (still or animated), GIF, or WebM video. Animated files should already have a transparent background.</p>
+    <input type="file" id="artFile" accept="image/*,video/webm,video/mp4" hidden>
   </div>
 
   <div class="set-group">
     <h4>Calendar</h4>
+    <label class="range">Frosted panel behind the dates
+      <input type="range" id="frost" min="0" max="100" step="1">
+    </label>
     <label class="check"><input type="checkbox" id="mondayStart"> Start weeks on Monday</label>
   </div>
 
   <div class="set-group">
-    <h4>Sync between devices</h4>
-    <p class="hint" id="syncHelp">Your events are stored on this device. To share them between your phone and browser, paste a GitHub token with only the <b>gist</b> permission. Your data goes into one private (secret) gist on your account.
-      <a href="https://github.com/settings/tokens/new?scopes=gist&description=Doodle%20Calendar%20sync" target="_blank" rel="noopener">Create a token</a></p>
-    <input id="syncToken" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off">
-    <div class="row">
-      <button class="primary" id="syncConnect">Connect</button>
-      <button class="ghost" id="syncNow">Sync now</button>
-      <button class="ghost danger" id="syncDisconnect">Disconnect</button>
-    </div>
-    <p class="hint" id="syncStatus"></p>
-  </div>
-
-  <div class="set-group">
     <h4>Backup</h4>
+    <p class="hint">Your events are saved on this device. Export a backup to keep a copy or move them to another device.</p>
     <div class="row">
       <button class="ghost" id="exportBtn">Export backup</button>
       <button class="ghost" id="importBtn">Import backup</button>
-      <input type="file" id="importFile" accept="application/json" hidden>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
     </div>
   </div>
   <div class="row end"><button class="primary" id="settingsClose">Done</button></div>

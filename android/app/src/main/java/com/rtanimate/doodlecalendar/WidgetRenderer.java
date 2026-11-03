@@ -53,7 +53,8 @@ final class WidgetRenderer {
         JSONObject data = readData(ctx);
         List<Ev> events = parseEvents(data);
         JSONObject settings = data.optJSONObject("settings");
-        int artOpacity = settings != null ? settings.optInt("artOpacity", 30) : 30;
+        int artOpacity = settings != null ? settings.optInt("artOpacity", 40) : 40;
+        int frost = settings != null ? settings.optInt("frost", 60) : 60;
         boolean mondayStart = settings != null && settings.optBoolean("mondayStart", false);
         int accent = ACCENTS[month];
 
@@ -91,6 +92,23 @@ final class WidgetRenderer {
         float fh = H * 0.10f;     // footer line
         float dh = H * 0.065f;    // weekday letters
         float padX = W * 0.04f;
+
+        // frosted card behind the weekday letters and dates only (same idea as the app)
+        if (frost > 0) {
+            float inset = padX * 0.45f;
+            RectF card = new RectF(inset, hh - H * 0.005f, W - inset, H - fh + H * 0.005f);
+            float cr = Math.min(W, H) * 0.05f;
+            p.setColor(PAPER);
+            p.setAlpha(Math.round(Math.min(1f, frost / 100f * 0.82f) * 255));
+            c.drawRoundRect(card, cr, cr, p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(Math.max(1f, W * 0.002f));
+            p.setColor(Color.WHITE);
+            p.setAlpha(Math.round(frost / 100f * 140));
+            c.drawRoundRect(card, cr, cr, p);
+            p.setStyle(Paint.Style.FILL);
+            p.setAlpha(255);
+        }
 
         TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         tp.setTextAlign(Paint.Align.CENTER);
@@ -253,7 +271,7 @@ final class WidgetRenderer {
                 o.inSampleSize = sample(bounds.outHeight, targetH);
                 return BitmapFactory.decodeFile(custom.getPath(), o);
             }
-            String path = String.format(Locale.US, "www/art/%02d.webp", month);
+            String path = String.format(Locale.US, "www/art/still/%02d.webp", month);
             try (InputStream in = ctx.getAssets().open(path)) {
                 bounds.inJustDecodeBounds = true;
                 BitmapFactory.decodeStream(in, null, bounds);
