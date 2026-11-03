@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
@@ -68,6 +69,7 @@ public class CalendarWidget extends AppWidgetProvider {
         AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
         int[] ids = mgr.getAppWidgetIds(new ComponentName(ctx, CalendarWidget.class));
         for (int id : ids) update(ctx, mgr, id);
+        AgendaWidget.updateAll(ctx);
     }
 
     static void update(Context ctx, AppWidgetManager mgr, int id) {
@@ -115,8 +117,10 @@ public class CalendarWidget extends AppWidgetProvider {
     private static PendingIntent openApp(Context ctx, int id, Calendar shown) {
         Intent i = new Intent(ctx, MainActivity.class);
         i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        i.putExtra(MainActivity.EXTRA_DATE, String.format(Locale.US, "%04d-%02d-01",
-                shown.get(Calendar.YEAR), shown.get(Calendar.MONTH) + 1));
+        String date = String.format(Locale.US, "%04d-%02d-01",
+                shown.get(Calendar.YEAR), shown.get(Calendar.MONTH) + 1);
+        i.setData(Uri.parse("doodle://month/" + id + "/" + date));
+        i.putExtra(MainActivity.EXTRA_DATE, date);
         return PendingIntent.getActivity(ctx, id * 10, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

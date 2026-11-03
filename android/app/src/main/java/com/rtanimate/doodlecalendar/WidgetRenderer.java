@@ -40,7 +40,7 @@ final class WidgetRenderer {
     static final int MUTED = 0xFF7A6C74;
     static final int SUN = 0xFFD8344A;
 
-    private static Typeface script, bold, semi;
+    static Typeface script, bold, semi;
 
     static final class Ev {
         String title, date, time, repeat;
@@ -230,7 +230,7 @@ final class WidgetRenderer {
         return bmp;
     }
 
-    private static void drawHalo(Canvas c, TextPaint tp, String s, float x, float y) {
+    static void drawHalo(Canvas c, TextPaint tp, String s, float x, float y) {
         int color = tp.getColor();
         Paint.Style st = tp.getStyle();
         tp.setStyle(Paint.Style.STROKE);
@@ -248,7 +248,7 @@ final class WidgetRenderer {
         drawHalo(c, tp, s, x, y);
     }
 
-    private static void loadFonts(Context ctx) {
+    static void loadFonts(Context ctx) {
         if (script != null) return;
         try {
             script = Typeface.createFromAsset(ctx.getAssets(), "www/fonts/DancingScript_700Bold.ttf");
@@ -261,7 +261,7 @@ final class WidgetRenderer {
         }
     }
 
-    private static Bitmap loadArt(Context ctx, int month, int targetH) {
+    static Bitmap loadArt(Context ctx, int month, int targetH) {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         File custom = MainActivity.artFile(ctx, month);
         try {
@@ -295,7 +295,7 @@ final class WidgetRenderer {
 
     // ---------- data ----------
 
-    private static JSONObject readData(Context ctx) {
+    static JSONObject readData(Context ctx) {
         try {
             String json = MainActivity.prefs(ctx).getString("data", null);
             return json == null ? new JSONObject() : new JSONObject(json);
@@ -304,7 +304,7 @@ final class WidgetRenderer {
         }
     }
 
-    private static List<Ev> parseEvents(JSONObject data) {
+    static List<Ev> parseEvents(JSONObject data) {
         List<Ev> out = new ArrayList<>();
         JSONArray arr = data.optJSONArray("events");
         if (arr == null) return out;
@@ -381,7 +381,7 @@ final class WidgetRenderer {
         return null;
     }
 
-    private static String fmtTime(String t) {
+    static String fmtTime(String t) {
         try {
             String[] p = t.split(":");
             int h = Integer.parseInt(p[0]);

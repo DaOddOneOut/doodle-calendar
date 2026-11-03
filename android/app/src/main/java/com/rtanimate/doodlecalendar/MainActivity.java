@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
     static final String START_URL = "https://" + HOST + "/assets/www/index.html";
     public static final String EXTRA_DATE = "date";
+    public static final String EXTRA_OPEN_DAY = "openDay";
+    public static final String EXTRA_ADD = "add";
     private static final int REQ_PICK = 7;
     private static final int REQ_SAVE = 8;
 
@@ -93,7 +95,11 @@ public class MainActivity extends Activity {
 
     private String urlFor(Intent intent) {
         String date = intent != null ? intent.getStringExtra(EXTRA_DATE) : null;
-        return date != null ? START_URL + "?date=" + Uri.encode(date) : START_URL;
+        if (date == null) return START_URL;
+        String url = START_URL + "?date=" + Uri.encode(date);
+        if (intent.getBooleanExtra(EXTRA_OPEN_DAY, false)) url += "&open=1";
+        if (intent.getBooleanExtra(EXTRA_ADD, false)) url += "&add=1";
+        return url;
     }
 
     @Override

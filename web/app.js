@@ -524,13 +524,19 @@ if (!isAndroid && "serviceWorker" in navigator && location.protocol === "https:"
 }
 
 // open a specific month when launched from the widget (?date=YYYY-MM-DD)
-const qDate = new URLSearchParams(location.search).get("date");
-if (qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate)) { const d = parseYmd(qDate); view = { y: d.getFullYear(), m: d.getMonth() }; }
+const qs = new URLSearchParams(location.search);
+const qDate = qs.get("date");
+const validQ = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate);
+if (validQ) { const d = parseYmd(qDate); view = { y: d.getFullYear(), m: d.getMonth() }; }
 
 document.body.classList.add("intro");
 applySettings();
 render();
 pushToAndroid();
+if (validQ && qs.get("open") === "1") {
+  openDay(qDate);
+  if (qs.get("add") === "1") setTimeout(() => $("evTitle").focus(), 350);
+}
 
 // test hook (used by automated checks only)
 window.__dc = { occurs, data: () => data, canAnimate };

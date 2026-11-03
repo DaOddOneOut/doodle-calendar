@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Doodle Calendar</string>
-    <string name="widget_name">Doodle Calendar</string>
+    <string name="widget_name">Doodle Calendar · Month</string>
     <string name="widget_desc">This month with its illustration behind it</string>
+    <string name="widget_agenda_name">Doodle Calendar · Month + Agenda</string>
+    <string name="widget_agenda_desc">This month beside today\'s events, with a + button</string>
 </resources>
