@@ -1,4 +1,5 @@
 name: Publish web app
+# Publishes /web to https://daoddoneout.github.io/doodle-calendar/
 on:
   push:
     branches: [main]
