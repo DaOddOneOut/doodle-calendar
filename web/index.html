@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doodle Calendar</title>
+<meta name="theme-color" content="#fbf4ec">
+<meta name="description" content="Personal doodle calendar">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="artStage" aria-hidden="true">
+  <img id="artA" class="art" alt="">
+  <img id="artB" class="art" alt="">
+</div>
+
+<main id="app">
+  <header class="top">
+    <button class="icon-btn" id="prevBtn" aria-label="Previous month">‹</button>
+    <div class="title-wrap">
+      <div class="year" id="yearLabel"></div>
+      <h1 id="monthLabel"></h1>
+    </div>
+    <button class="icon-btn" id="nextBtn" aria-label="Next month">›</button>
+  </header>
+
+  <div class="toolbar">
+    <button class="chip" id="todayBtn">Today</button>
+    <button class="chip" id="peekBtn" title="Show the illustration">✿ Art</button>
+    <span class="sync-dot" id="syncDot" title="Sync status"></span>
+    <button class="chip" id="installBtn" hidden>Install</button>
+    <button class="icon-btn small" id="settingsBtn" aria-label="Settings">⚙</button>
+  </div>
+
+  <section class="cal" id="cal">
+    <div class="dow" id="dow"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section class="below">
+    <div class="panel">
+      <h2>This month</h2>
+      <ul class="agenda" id="agenda"></ul>
+    </div>
+    <div class="panel">
+      <h2>Month notes</h2>
+      <textarea id="monthNote" rows="3" placeholder="Goals, reminders, anything for this month…"></textarea>
+    </div>
+  </section>
+</main>
+
+<!-- Day sheet -->
+<div class="sheet-backdrop" id="backdrop" hidden></div>
+<section class="sheet" id="daySheet" hidden aria-modal="true" role="dialog">
+  <div class="sheet-handle"></div>
+  <div class="sheet-head"><h3 id="dayTitle"></h3><button class="icon-btn small" id="dayClose" aria-label="Close">×</button></div>
+  <ul class="day-events" id="dayEvents"></ul>
+  <form id="eventForm" autocomplete="off">
+    <input type="hidden" id="evId">
+    <input id="evTitle" placeholder="Add an event or note" required maxlength="120">
+    <div class="row">
+      <label>Time <input type="time" id="evTime"></label>
+      <label>Repeat
+        <select id="evRepeat">
+          <option value="none">Never</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </label>
+    </div>
+    <div class="colors" id="evColors"></div>
+    <textarea id="evNotes" rows="2" placeholder="Notes (optional)"></textarea>
+    <div class="row end">
+      <button type="button" class="ghost danger" id="evDelete" hidden>Delete</button>
+      <button type="button" class="ghost" id="evCancel" hidden>Cancel</button>
+      <button type="submit" class="primary" id="evSave">Add</button>
+    </div>
+  </form>
+</section>
+
+<!-- Settings sheet -->
+<section class="sheet" id="settingsSheet" hidden aria-modal="true" role="dialog">
+  <div class="sheet-handle"></div>
+  <h3>Settings</h3>
+
+  <div class="set-group">
+    <h4>Illustration</h4>
+    <label class="range">How visible behind the calendar
+      <input type="range" id="artOpacity" min="10" max="70" step="1">
+    </label>
+    <label class="check"><input type="checkbox" id="artIntro"> Play the reveal when switching months</label>
+    <p class="hint">Replace this month's art with your own (PNG with transparency works best).</p>
+    <div class="row">
+      <button class="ghost" id="artUploadBtn">Replace <span id="artMonthName"></span> art</button>
+      <button class="ghost" id="artResetBtn">Use original</button>
+    </div>
+    <label class="check"><input type="checkbox" id="artCutout" checked> Remove white background from uploads</label>
+    <input type="file" id="artFile" accept="image/*" hidden>
+  </div>
+
+  <div class="set-group">
+    <h4>Calendar</h4>
+    <label class="check"><input type="checkbox" id="mondayStart"> Start weeks on Monday</label>
+  </div>
+
+  <div class="set-group">
+    <h4>Sync between devices</h4>
+    <p class="hint" id="syncHelp">Your events are stored on this device. To share them between your phone and browser, paste a GitHub token with only the <b>gist</b> permission. Your data goes into one private (secret) gist on your account.
+      <a href="https://github.com/settings/tokens/new?scopes=gist&description=Doodle%20Calendar%20sync" target="_blank" rel="noopener">Create a token</a></p>
+    <input id="syncToken" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off">
+    <div class="row">
+      <button class="primary" id="syncConnect">Connect</button>
+      <button class="ghost" id="syncNow">Sync now</button>
+      <button class="ghost danger" id="syncDisconnect">Disconnect</button>
+    </div>
+    <p class="hint" id="syncStatus"></p>
+  </div>
+
+  <div class="set-group">
+    <h4>Backup</h4>
+    <div class="row">
+      <button class="ghost" id="exportBtn">Export backup</button>
+      <button class="ghost" id="importBtn">Import backup</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+  </div>
+  <div class="row end"><button class="primary" id="settingsClose">Done</button></div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

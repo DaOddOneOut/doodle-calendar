@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Doodle Calendar</string>
+    <string name="widget_name">Doodle Calendar</string>
+    <string name="widget_desc">This month with its illustration behind it</string>
+</resources>
