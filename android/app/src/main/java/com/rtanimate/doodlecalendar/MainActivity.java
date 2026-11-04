@@ -120,8 +120,9 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // Close an open sheet first; leave the app only when nothing is open.
         web.evaluateJavascript(
-                "(function(){var a=document.getElementById('daySheet'),b=document.getElementById('settingsSheet');"
-                        + "var open=(a&&!a.hidden)||(b&&!b.hidden)||document.body.classList.contains('peek');"
+                "(function(){var a=document.getElementById('daySheet'),b=document.getElementById('settingsSheet'),"
+                        + "c=document.getElementById('picker'),d=document.getElementById('doodleSheet');"
+                        + "var open=(a&&!a.hidden)||(b&&!b.hidden)||(c&&!c.hidden)||(d&&!d.hidden)||document.body.classList.contains('peek');"
                         + "if(open)document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));return open;})()",
                 value -> {
                     if (!"true".equals(value)) super.onBackPressed();

@@ -67,6 +67,7 @@
 <section class="sheet" id="daySheet" hidden aria-modal="true" role="dialog">
   <div class="sheet-handle"></div>
   <div class="sheet-head"><h3 id="dayTitle"></h3><button class="icon-btn small" id="dayClose" aria-label="Close">×</button></div>
+  <div class="day-doodle" id="dayDoodle"></div>
   <ul class="day-events" id="dayEvents"></ul>
   <form id="eventForm" autocomplete="off">
     <input type="hidden" id="evId">
@@ -84,6 +85,7 @@
     </div>
     <div class="colors" id="evColors"></div>
     <textarea id="evNotes" rows="2" placeholder="Notes (optional)"></textarea>
+    <div class="ev-doodle-row" id="evDoodle"></div>
     <div class="row end">
       <button type="button" class="ghost danger" id="evDelete" hidden>Delete</button>
       <button type="button" class="ghost" id="evCancel" hidden>Cancel</button>
@@ -143,6 +145,34 @@
     </div>
   </div>
   <div class="row end"><button class="primary" id="settingsClose">Done</button></div>
+</section>
+
+<!-- Doodle editor -->
+<section class="doodle-sheet" id="doodleSheet" hidden role="dialog" aria-modal="true" aria-label="Doodle">
+  <div class="doodle-top">
+    <button type="button" class="ghost" id="dCancel">Cancel</button>
+    <div class="doodle-title">Doodle</div>
+    <button type="button" class="primary" id="dSave">Save</button>
+  </div>
+  <div class="doodle-stage">
+    <canvas id="doodleCanvas"></canvas>
+    <canvas id="doodleLive"></canvas>
+  </div>
+  <div class="doodle-tools">
+    <div class="brushes" id="dBrushes">
+      <button type="button" data-tool="pen" title="Pen"><svg viewBox="0 0 32 32"><path d="M6 26 L22 8 l4 4 L10 28 Z" fill="currentColor" opacity=".25"/><path d="M6 26 l2-6 14-14 4 4-14 14z M6 26 l4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Pen</span></button>
+      <button type="button" data-tool="marker" title="Marker"><svg viewBox="0 0 32 32"><rect x="11" y="4" width="10" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 21 h8 l-1 5 h-6z" fill="currentColor"/></svg><span>Marker</span></button>
+      <button type="button" data-tool="highlighter" title="Highlighter"><svg viewBox="0 0 32 32"><rect x="4" y="18" width="24" height="8" rx="2" fill="currentColor" opacity=".35"/><path d="M12 4 h8 v10 l-2 4 h-4 l-2-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Highlight</span></button>
+      <button type="button" data-tool="eraser" title="Eraser"><svg viewBox="0 0 32 32"><path d="M5 20 L17 8 l9 9 -9 9 H10z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M5 20 l6 6" stroke="currentColor" stroke-width="2"/></svg><span>Eraser</span></button>
+    </div>
+    <div class="doodle-row">
+      <label class="dsize" title="Brush size"><span class="dot-small"></span><input type="range" id="dSize" min="40" max="260" value="100"><span class="dot-big"></span></label>
+      <button type="button" class="icon-btn small" id="dUndo" aria-label="Undo">↶</button>
+      <button type="button" class="icon-btn small" id="dRedo" aria-label="Redo">↷</button>
+      <button type="button" class="chip" id="dClear">Clear</button>
+    </div>
+    <div class="dcolors" id="dColors"></div>
+  </div>
 </section>
 
 <div class="toast" id="toast" hidden></div>

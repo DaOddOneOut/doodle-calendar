@@ -44,23 +44,82 @@ function persist() {
 }
 
 /* custom art lives in IndexedDB (files are too big for localStorage) */
-const idb = (() => {
-  let dbp;
-  const open = () => dbp || (dbp = new Promise((res, rej) => {
-    const r = indexedDB.open("doodle-calendar", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("art");
+let dbp;
+function openDb() {
+  return dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("doodle-calendar", 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains("art")) db.createObjectStore("art");
+      if (!db.objectStoreNames.contains("doodles")) db.createObjectStore("doodles");
+    };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   }));
-  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => {
-    const t = db.transaction("art", mode); const req = fn(t.objectStore("art"));
+}
+function makeStore(name) {
+  const tx = async (mode, fn) => { const db = await openDb(); return new Promise((res, rej) => {
+    const t = db.transaction(name, mode); const req = fn(t.objectStore(name));
     t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
   }); };
   return {
     get: (k) => tx("readonly", (s) => s.get(k)).catch(() => null),
     set: (k, v) => tx("readwrite", (s) => s.put(v, k)),
     del: (k) => tx("readwrite", (s) => s.delete(k)),
+    keys: () => tx("readonly", (s) => s.getAllKeys()).catch(() => []),
+    all: () => tx("readonly", (s) => s.getAll()).catch(() => []),
   };
-})();
+}
+const idb = makeStore("art");
+
+/* ---------------- doodles ----------------
+   Stored in IndexedDB under "ev:<eventId>" or "day:YYYY-MM-DD" as {full, thumb} image blobs. */
+const doodleStore = makeStore("doodles");
+const doodleThumbs = {}; // key -> object URL of the small thumbnail
+async function loadDoodles() {
+  const [keys, vals] = await Promise.all([doodleStore.keys(), doodleStore.all()]);
+  keys.forEach((k, i) => { if (vals[i] && vals[i].thumb) doodleThumbs[k] = URL.createObjectURL(vals[i].thumb); });
+}
+async function saveDoodle(key, full) {
+  const thumb = await makeThumb(full);
+  await doodleStore.set(key, { full, thumb, updatedAt: now() });
+  if (doodleThumbs[key]) URL.revokeObjectURL(doodleThumbs[key]);
+  doodleThumbs[key] = URL.createObjectURL(thumb);
+}
+async function deleteDoodle(key) {
+  await doodleStore.del(key);
+  if (doodleThumbs[key]) { URL.revokeObjectURL(doodleThumbs[key]); delete doodleThumbs[key]; }
+}
+/* thumbnail cropped to the drawing itself, so small stickers stay readable */
+async function makeThumb(blob) {
+  const bmp = await createImageBitmap(blob);
+  const S = 256, probe = document.createElement("canvas"); probe.width = probe.height = S;
+  const pg = probe.getContext("2d"); pg.drawImage(bmp, 0, 0, S, S);
+  const px = pg.getImageData(0, 0, S, S).data;
+  let x0 = S, y0 = S, x1 = -1, y1 = -1;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const i = (y * S + x) * 4;
+    if (Math.abs(px[i] - 251) + Math.abs(px[i + 1] - 244) + Math.abs(px[i + 2] - 236) > 30) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  let sx = 0, sy = 0, side = S;
+  if (x1 >= 0) {
+    side = Math.max(x1 - x0, y1 - y0) * 1.18 + 8;
+    side = Math.min(S, Math.max(side, S * 0.3));
+    sx = Math.min(S - side, Math.max(0, (x0 + x1) / 2 - side / 2));
+    sy = Math.min(S - side, Math.max(0, (y0 + y1) / 2 - side / 2));
+  }
+  const k = bmp.width / S, c = document.createElement("canvas"); c.width = c.height = 200;
+  const g = c.getContext("2d"); g.fillStyle = PAPER; g.fillRect(0, 0, 200, 200);
+  g.drawImage(bmp, sx * k, sy * k, side * k, side * k, 0, 0, 200, 200);
+  return new Promise((res) => c.toBlob(res, "image/png"));
+}
+/** sticker for a calendar date: the day doodle first, otherwise the first event doodle */
+function stickerFor(ds, evs) {
+  if (doodleThumbs["day:" + ds]) return doodleThumbs["day:" + ds];
+  for (const e of evs) if (doodleThumbs["ev:" + e.id]) return doodleThumbs["ev:" + e.id];
+  return null;
+}
 const customCache = {};
 /** What to show for a month: {url, video:boolean, custom:boolean} */
 async function artSource(m) {
@@ -134,8 +193,9 @@ function render(dir = 0) {
     const ds = ymd(d);
     const evs = eventsOn(ds);
     const cls = ["day", d.getDay() === 0 ? "sun" : "", d.getMonth() !== m ? "other" : "", ds === todayS ? "today" : "", ds === selected ? "selected" : ""].join(" ");
+    const sticker = stickerFor(ds, evs);
     const dots = evs.slice(0, 3).map((e) => `<i style="background:${e.color || ACCENTS[m]}"></i>`).join("");
-    html += `<button class="${cls}" data-d="${ds}" aria-label="${d.toDateString()}${evs.length ? `, ${evs.length} event${evs.length > 1 ? "s" : ""}` : ""}"><span class="num">${d.getDate()}</span><span class="dots">${dots}</span></button>`;
+    html += `<button class="${cls}" data-d="${ds}" aria-label="${d.toDateString()}${evs.length ? `, ${evs.length} event${evs.length > 1 ? "s" : ""}` : ""}"><span class="num">${d.getDate()}</span><span class="dots">${dots}</span>${sticker ? `<img class="sticker" src="${sticker}" alt="" style="--tilt:${((d.getDate() * 37) % 13) - 6}deg">` : ""}</button>`;
   }
   grid.innerHTML = html;
   grid.classList.remove("swap-next", "swap-prev");
@@ -279,6 +339,7 @@ function openDay(ds) {
   const d = parseYmd(ds);
   $("dayTitle").textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   renderDayEvents();
+  renderDayDoodle();
   resetForm();
   openSheet($("daySheet"));
   render();
@@ -289,8 +350,55 @@ function renderDayEvents() {
     <li data-id="${e.id}"><span class="c" style="background:${e.color}"></span>
       <div><div>${esc(e.title)}</div>
       <div class="meta">${[e.time ? fmtTime(e.time) : "All day", e.repeat !== "none" ? `repeats ${e.repeat}` : ""].filter(Boolean).join(" · ")}</div>
-      ${e.notes ? `<div class="notes">${esc(e.notes)}</div>` : ""}</div></li>`).join("");
+      ${e.notes ? `<div class="notes">${esc(e.notes)}</div>` : ""}</div>
+      ${doodleThumbs["ev:" + e.id] ? `<img class="ev-doodle" data-doodle="${e.id}" src="${doodleThumbs["ev:" + e.id]}" alt="Doodle">` : ""}</li>`).join("");
 }
+function renderDayDoodle() {
+  const key = "day:" + selected, url = doodleThumbs[key];
+  $("dayDoodle").innerHTML = url
+    ? `<img class="day-doodle-img" src="${url}" alt="Day doodle"><div class="dd-actions"><button type="button" class="ghost" data-act="edit">✎ Edit day doodle</button><button type="button" class="ghost danger" data-act="del">Remove</button></div>`
+    : `<button type="button" class="ghost doodle-btn" data-act="edit">✎ Doodle this day</button>`;
+}
+$("dayDoodle").onclick = async (e) => {
+  const t = e.target.closest("[data-act]");
+  const act = t ? t.dataset.act : e.target.matches(".day-doodle-img") ? "edit" : null;
+  if (!act) return;
+  const key = "day:" + selected, date = selected;
+  if (act === "del") { await deleteDoodle(key); renderDayDoodle(); render(); toast("Day doodle removed"); return; }
+  const rec = await doodleStore.get(key);
+  openDoodle(rec && rec.full, async (blob) => { await saveDoodle("day:" + date, blob); if (selected === date) renderDayDoodle(); render(); });
+};
+
+/* doodle attached to the event in the form (kept until the event is added, if it's new) */
+let formDoodle = { state: "none", blob: null };
+function renderFormDoodle() {
+  const id = $("evId").value;
+  const url = formDoodle.state === "new" ? formDoodle.url : formDoodle.state === "existing" ? doodleThumbs["ev:" + id] : null;
+  $("evDoodle").innerHTML = url
+    ? `<img class="ev-doodle" src="${url}" alt="Doodle" data-act="edit"><button type="button" class="ghost" data-act="edit">✎ Edit doodle</button><button type="button" class="ghost danger" data-act="del">Remove</button>`
+    : `<button type="button" class="ghost doodle-btn" data-act="edit">✎ Add a doodle</button><span class="hint">optional</span>`;
+}
+$("evDoodle").onclick = async (e) => {
+  const t = e.target.closest("[data-act]"); if (!t) return;
+  const id = $("evId").value;
+  if (t.dataset.act === "del") {
+    if (id && formDoodle.state === "existing") { await deleteDoodle("ev:" + id); render(); renderDayEvents(); }
+    if (formDoodle.url) URL.revokeObjectURL(formDoodle.url);
+    formDoodle = { state: "none", blob: null }; renderFormDoodle(); return;
+  }
+  let start = formDoodle.blob;
+  if (!start && formDoodle.state === "existing") { const rec = await doodleStore.get("ev:" + id); start = rec && rec.full; }
+  openDoodle(start, async (blob) => {
+    if (id && data.events[id]) { // existing event: save right away
+      await saveDoodle("ev:" + id, blob); formDoodle = { state: "existing", blob: null };
+      render(); renderDayEvents();
+    } else {
+      if (formDoodle.url) URL.revokeObjectURL(formDoodle.url);
+      formDoodle = { state: "new", blob, url: URL.createObjectURL(blob) };
+    }
+    renderFormDoodle();
+  });
+};
 function paintColors() {
   $("evColors").innerHTML = COLORS.map((c) => `<button type="button" data-c="${c}" class="${c === formColor ? "on" : ""}" style="background:${c}" aria-label="color"></button>`).join("");
 }
@@ -298,12 +406,15 @@ function resetForm() {
   $("evId").value = ""; $("evTitle").value = ""; $("evTime").value = ""; $("evRepeat").value = "none"; $("evNotes").value = "";
   formColor = COLORS[0]; paintColors();
   $("evSave").textContent = "Add"; $("evDelete").hidden = true; $("evCancel").hidden = true;
+  if (formDoodle.url) URL.revokeObjectURL(formDoodle.url);
+  formDoodle = { state: "none", blob: null }; renderFormDoodle();
 }
 function editEvent(id) {
   const e = data.events[id]; if (!e) return;
   $("evId").value = id; $("evTitle").value = e.title; $("evTime").value = e.time || ""; $("evRepeat").value = e.repeat || "none"; $("evNotes").value = e.notes || "";
   formColor = e.color || COLORS[0]; paintColors();
   $("evSave").textContent = "Save"; $("evDelete").hidden = false; $("evCancel").hidden = false;
+  formDoodle = { state: doodleThumbs["ev:" + id] ? "existing" : "none", blob: null }; renderFormDoodle();
   $("evTitle").focus();
 }
 $("eventForm").addEventListener("submit", (ev) => {
@@ -316,16 +427,23 @@ $("eventForm").addEventListener("submit", (ev) => {
     time: $("evTime").value, repeat: $("evRepeat").value, color: formColor,
     notes: $("evNotes").value.trim(), updatedAt: now(),
   };
-  persist(); renderDayEvents(); resetForm(); render();
+  const pending = formDoodle.state === "new" ? formDoodle.blob : null;
+  persist();
+  (pending ? saveDoodle("ev:" + id, pending) : Promise.resolve()).then(() => { renderDayEvents(); resetForm(); render(); });
 });
 $("evDelete").onclick = () => {
   const id = $("evId").value; if (!data.events[id]) return;
   delete data.events[id];
+  deleteDoodle("ev:" + id).then(() => render());
   persist(); renderDayEvents(); resetForm(); render(); toast("Deleted");
 };
 $("evCancel").onclick = resetForm;
 $("evColors").onclick = (e) => { const c = e.target.dataset.c; if (c) { formColor = c; paintColors(); } };
-$("dayEvents").onclick = (e) => { const li = e.target.closest("li"); if (li) editEvent(li.dataset.id); };
+$("dayEvents").onclick = async (e) => {
+  const li = e.target.closest("li"); if (!li) return;
+  editEvent(li.dataset.id);
+  if (e.target.matches(".ev-doodle")) $("evDoodle").querySelector("[data-act=edit]").click();
+};
 
 /* ---------------- month notes ---------------- */
 let noteTimer;
@@ -337,6 +455,138 @@ $("monthNote").addEventListener("input", () => {
   }, 500);
 });
 
+/* ---------------- doodle editor ---------------- */
+const DOODLE_COLORS = ["#2b2130", "#e2789a", "#2f86d0", "#6aa55a", "#f2c230", "#e0731d", "#d32f37", "#8a63c9"];
+const PAPER = "#fbf4ec";
+const BRUSHES = { pen: { size: 7 }, marker: { size: 20 }, highlighter: { size: 28, alpha: 0.35 }, eraser: { size: 30 } };
+const DSIZE = 1024;
+const dd = { tool: "pen", color: DOODLE_COLORS[0], scale: 1, strokes: [], redo: [], base: null, onSave: null, cur: null, armedCancel: 0 };
+const dcan = $("doodleCanvas"), dctx = dcan.getContext("2d");
+const dlive = $("doodleLive"), dlctx = dlive.getContext("2d");
+dcan.width = dcan.height = dlive.width = dlive.height = DSIZE;
+
+async function openDoodle(startBlob, onSave) {
+  dd.strokes = []; dd.redo = []; dd.onSave = onSave; dd.base = null; dd.cur = null;
+  if (startBlob) { try { dd.base = await createImageBitmap(startBlob); } catch {} }
+  redrawDoodle(); paintDoodleTools();
+  $("doodleSheet").hidden = false; document.body.classList.add("doodling");
+}
+function closeDoodle() { $("doodleSheet").hidden = true; document.body.classList.remove("doodling"); }
+const doodleOpen = () => !$("doodleSheet").hidden;
+function fillPaper(ctx) { ctx.save(); ctx.globalAlpha = 1; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, DSIZE, DSIZE); ctx.restore(); }
+function strokeCtx(st) { return st.tool === "highlighter" ? dlctx : dctx; }
+function widthAt(st, p) { const w = BRUSHES[st.tool].size * st.scale; return st.pressure ? w * (0.35 + p.p * 1.3) : w; }
+function styleFor(ctx, st) {
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = ctx.fillStyle = st.tool === "eraser" ? PAPER : st.color;
+}
+/* smooth line through midpoints; draws only the segments from index `from` on */
+function drawSegments(st, from) {
+  const ctx = strokeCtx(st), pts = st.points;
+  ctx.save(); styleFor(ctx, st);
+  if (pts.length === 1 && from === 0) {
+    ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, widthAt(st, pts[0]) / 2, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = Math.max(2, from); i < pts.length; i++) {
+    const a = pts[i - 2], b = pts[i - 1], c = pts[i];
+    const m0 = i === 2 ? a : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const m1 = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
+    ctx.lineWidth = widthAt(st, b);
+    ctx.beginPath(); ctx.moveTo(m0.x, m0.y); ctx.quadraticCurveTo(b.x, b.y, m1.x, m1.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawTail(st) {
+  const pts = st.points, n = pts.length; if (n < 2) return;
+  const ctx = strokeCtx(st), a = pts[n - 2], b = pts[n - 1];
+  const m = n === 2 ? a : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  ctx.save(); styleFor(ctx, st); ctx.lineWidth = widthAt(st, b);
+  ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+}
+function settleHighlight() {
+  dctx.save(); dctx.globalAlpha = BRUSHES.highlighter.alpha; dctx.drawImage(dlive, 0, 0); dctx.restore();
+  dlctx.clearRect(0, 0, DSIZE, DSIZE);
+}
+function redrawDoodle() {
+  fillPaper(dctx);
+  if (dd.base) dctx.drawImage(dd.base, 0, 0, DSIZE, DSIZE);
+  dlctx.clearRect(0, 0, DSIZE, DSIZE);
+  for (const st of dd.strokes) {
+    if (st.tool === "clear") { fillPaper(dctx); continue; }
+    drawSegments(st, 0); drawTail(st);
+    if (st.tool === "highlighter") settleHighlight();
+  }
+}
+function paintDoodleTools() {
+  for (const b of $("dBrushes").children) b.classList.toggle("on", b.dataset.tool === dd.tool);
+  $("dColors").innerHTML = DOODLE_COLORS.map((c) => `<button type="button" data-c="${c}" class="${c === dd.color ? "on" : ""}" style="background:${c}" aria-label="color ${c}"></button>`).join("")
+    + `<label class="${DOODLE_COLORS.includes(dd.color) ? "" : "on"}" title="More colors" ${DOODLE_COLORS.includes(dd.color) ? "" : `style="background:${dd.color}"`}><input type="color" id="dColorPick" value="${dd.color}"></label>`;
+  $("dUndo").disabled = !dd.strokes.length; $("dRedo").disabled = !dd.redo.length;
+}
+function doodlePos(e) {
+  const r = dlive.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * DSIZE / r.width, y: (e.clientY - r.top) * DSIZE / r.height, p: e.pointerType === "pen" ? (e.pressure || 0.5) : 0.5 };
+}
+dlive.addEventListener("pointerdown", (e) => {
+  if (e.button > 0) return;
+  e.preventDefault(); dlive.setPointerCapture(e.pointerId);
+  dd.cur = { tool: dd.tool, color: dd.color, scale: dd.scale, pressure: e.pointerType === "pen", points: [doodlePos(e)] };
+  dlive.style.opacity = dd.tool === "highlighter" ? BRUSHES.highlighter.alpha : 1;
+  drawSegments(dd.cur, 0);
+});
+dlive.addEventListener("pointermove", (e) => {
+  if (!dd.cur) return;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  const from = dd.cur.points.length;
+  for (const ce of (evs.length ? evs : [e])) {
+    const p = doodlePos(ce), last = dd.cur.points[dd.cur.points.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) > 1.5) dd.cur.points.push(p);
+  }
+  if (dd.cur.tool === "highlighter") { // redraw the whole stroke so overlaps stay even
+    dlctx.clearRect(0, 0, DSIZE, DSIZE); drawSegments(dd.cur, 0);
+  } else drawSegments(dd.cur, from);
+});
+function endStroke() {
+  if (!dd.cur) return;
+  drawTail(dd.cur);
+  if (dd.cur.tool === "highlighter") settleHighlight();
+  dd.strokes.push(dd.cur); dd.redo = []; dd.cur = null;
+  paintDoodleTools();
+}
+dlive.addEventListener("pointerup", endStroke);
+dlive.addEventListener("pointercancel", endStroke);
+
+$("dBrushes").onclick = (e) => { const b = e.target.closest("button"); if (b) { dd.tool = b.dataset.tool; paintDoodleTools(); } };
+$("dColors").onclick = (e) => {
+  const b = e.target.closest("button[data-c]"); if (!b) return;
+  dd.color = b.dataset.c; if (dd.tool === "eraser") dd.tool = "pen"; paintDoodleTools();
+};
+$("dColors").addEventListener("input", (e) => {
+  if (e.target.id !== "dColorPick") return;
+  dd.color = e.target.value; if (dd.tool === "eraser") dd.tool = "pen";
+  const lab = e.target.parentElement; lab.style.background = dd.color;
+  for (const b of $("dColors").querySelectorAll("button")) b.classList.remove("on");
+  lab.classList.add("on");
+  for (const b of $("dBrushes").children) b.classList.toggle("on", b.dataset.tool === dd.tool);
+});
+$("dSize").oninput = (e) => { dd.scale = +e.target.value / 100; };
+$("dUndo").onclick = () => { if (dd.strokes.length) { dd.redo.push(dd.strokes.pop()); redrawDoodle(); paintDoodleTools(); } };
+$("dRedo").onclick = () => { if (dd.redo.length) { dd.strokes.push(dd.redo.pop()); redrawDoodle(); paintDoodleTools(); } };
+$("dClear").onclick = () => { dd.strokes.push({ tool: "clear" }); dd.redo = []; fillPaper(dctx); paintDoodleTools(); };
+function cancelDoodle() {
+  if (dd.strokes.length && now() - dd.armedCancel > 2500) { dd.armedCancel = now(); toast("Tap Cancel again to discard this doodle"); return; }
+  dd.armedCancel = 0; closeDoodle();
+}
+$("dCancel").onclick = cancelDoodle;
+$("dSave").onclick = () => {
+  if (!dd.strokes.length) { closeDoodle(); return; }
+  const done = async (blob) => {
+    closeDoodle();
+    try { await dd.onSave(blob); toast("Doodle saved"); } catch (err) { console.error(err); toast("Couldn't save the doodle"); }
+  };
+  dcan.toBlob((b) => b && b.type === "image/webp" ? done(b) : dcan.toBlob(done, "image/png"), "image/webp", 0.9);
+};
+
 /* ---------------- interactions ---------------- */
 $("prevBtn").onclick = () => go(-1);
 $("nextBtn").onclick = () => go(1);
@@ -347,9 +597,14 @@ $("backdrop").onclick = closeSheets;
 $("dayClose").onclick = closeSheets;
 $("peekBtn").onclick = () => document.body.classList.toggle("peek");
 document.addEventListener("keydown", (e) => {
-  if (e.target.matches("input, textarea, select")) return;
+  if (e.target.matches && e.target.matches("input, textarea, select")) return;
   if (e.key === "ArrowLeft") go(-1);
   if (e.key === "ArrowRight") go(1);
+  if (doodleOpen()) {
+    if (e.key === "Escape") cancelDoodle();
+    if ((e.ctrlKey || e.metaKey) && e.key === "z") (e.shiftKey ? $("dRedo") : $("dUndo")).click();
+    return;
+  }
   if (e.key === "Escape") { document.body.classList.remove("peek"); closeSheets(); }
 });
 (() => { // swipe between months
@@ -468,8 +723,12 @@ async function stillFrameDataUrl(blob) {
   } finally { URL.revokeObjectURL(url); }
 }
 
-$("exportBtn").onclick = () => {
-  const json = JSON.stringify({ v: 1, events: data.events, monthNotes: data.monthNotes }, null, 2);
+const blobToDataUrl = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+$("exportBtn").onclick = async () => {
+  const doodles = {};
+  const [keys, vals] = await Promise.all([doodleStore.keys(), doodleStore.all()]);
+  for (let i = 0; i < keys.length; i++) if (vals[i] && vals[i].full) doodles[keys[i]] = await blobToDataUrl(vals[i].full);
+  const json = JSON.stringify({ v: 2, events: data.events, monthNotes: data.monthNotes, doodles }, null, 2);
   if (isAndroid) { window.AndroidBridge.saveFile(`doodle-calendar-backup-${ymd(new Date())}.json`, json); return; }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -484,6 +743,9 @@ $("importFile").onchange = async (e) => {
     for (const [k, v] of Object.entries(incoming.events)) if (!v.deleted) data.events[k] = v;
     for (const [k, v] of Object.entries(incoming.monthNotes || {})) {
       if (!data.monthNotes[k] || (v.updatedAt || 0) > (data.monthNotes[k].updatedAt || 0)) data.monthNotes[k] = v;
+    }
+    for (const [k, url] of Object.entries(incoming.doodles || {})) {
+      if (!doodleThumbs[k]) await saveDoodle(k, await (await fetch(url)).blob());
     }
     persist(); render(); toast("Backup imported");
   } catch { toast("That file isn't a calendar backup"); }
@@ -533,6 +795,7 @@ document.body.classList.add("intro");
 applySettings();
 render();
 pushToAndroid();
+loadDoodles().then(() => render());
 if (validQ && qs.get("open") === "1") {
   openDay(qDate);
   if (qs.get("add") === "1") setTimeout(() => $("evTitle").focus(), 350);
